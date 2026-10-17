@@ -106,12 +106,21 @@ Cmdflip doesn't offer the option there, and warns you if an older version alread
 
 ## How it stays reliable
 
-- The physical Alt and Win keys never reach Windows, so menus and Start don't open by accident.
-- Ctrl is held for the whole time Cmd is held, so auto-repeat, Cmd+Shift+Z and Cmd+click behave correctly.
-- Every injected combination restores the modifier state in the same batch, so modifiers can't get stuck.
-- Arrow, Home and End keys are injected as extended keys, so NumLock never turns them into digits.
-- The hook runs on its own high-priority thread and launches apps in the background. Windows silently removes a hook that responds too slowly, and this keeps that from happening.
-- State is reset and the hooks are reinstalled after lock/unlock and sleep.
+Key remappers often cause stuck keys, random Start menus, or stop working without warning.
+Cmdflip is built to avoid these problems:
+
+- **Start and app menus don't pop up by accident.** Windows never sees a lone Alt or Win press,
+  so it only opens Start when you tap the Windows key on its own.
+- **Held shortcuts work.** Holding Cmd+Z undoes repeatedly, Cmd+Shift+Z redoes, and Cmd+click
+  opens links in a new tab or selects multiple files, as on a Mac.
+- **Ctrl and Shift never get stuck.** Every shortcut releases exactly what it pressed, all in one step.
+- **NumLock doesn't change anything.** Cmd+arrows move the cursor and never type digits.
+- **It doesn't stop working on its own.** Windows quietly disables keyboard tools that respond too
+  slowly. Cmdflip answers every key press instantly, even while it starts another app.
+- **It recovers after lock and sleep.** Keys pressed when the PC locked or went to sleep are
+  forgotten, and the keyboard hook is set up again.
+
+For the technical details, see [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Build
 
