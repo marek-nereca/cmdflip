@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-17
+
 ### Security
 - "Start at login as administrator" is now only available when Cmdflip is installed for all users
   (in Program Files). In a per-user install another program could replace Cmdflip.exe and get
@@ -29,5 +31,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Version shown in the tray menu and a daily check for new releases on GitHub.
 - Installer (per-user, no admin rights needed) and portable zip.
 
-[Unreleased]: https://github.com/marek-nereca/cmdflip/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/marek-nereca/cmdflip/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/marek-nereca/cmdflip/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/marek-nereca/cmdflip/releases/tag/v0.1.0
