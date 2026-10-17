@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Security
+- "Start at login as administrator" is now only available when Cmdflip is installed for all users
+  (in Program Files). In a per-user install another program could replace Cmdflip.exe and get
+  administrator rights at the next login. If such a task already exists, Cmdflip shows a warning
+  at startup, and the task can still be turned off from the tray menu.
+- The scheduled task is now created by an elevated Cmdflip through the Task Scheduler API instead
+  of from a temporary XML file another program could change before it was read.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

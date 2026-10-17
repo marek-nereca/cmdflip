@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Security;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Threading;
@@ -16,6 +15,10 @@ namespace Cmdflip
         [STAThread]
         static void Main(string[] args)
         {
+            // Elevated helper started from the tray menu; see AdminTask.
+            if (Array.IndexOf(args, AdminTask.OnArg) >= 0) { Environment.ExitCode = AdminTask.Apply(true); return; }
+            if (Array.IndexOf(args, AdminTask.OffArg) >= 0) { Environment.ExitCode = AdminTask.Apply(false); return; }
+
             bool created;
             using (var mutex = new Mutex(true, @"Local\Cmdflip.SingleInstance", out created))
             {
@@ -65,6 +68,10 @@ namespace Cmdflip
             tray.DoubleClick += (s, e) => Update(c => c.Enabled = !c.Enabled);
             tray.ContextMenuStrip.Opening += (s, e) => RefreshMenu();
             RefreshMenu();
+            // Created by an older version from a per-user install, see AdminTask.
+            if (adminLoginItem.Checked && !AdminTask.InProtectedFolder)
+                ShowError("\"Start at login as administrator\" is unsafe for this install, because other programs " +
+                          "can replace Cmdflip.exe in this folder. Turn it off in the tray menu, or reinstall for all users.");
 
             watcher = new FileSystemWatcher(Config.Dir, "config.ini");
             watcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size;
@@ -135,7 +142,6 @@ namespace Cmdflip
 
             loginItem = new ToolStripMenuItem("Start at login", null, (s, e) => ToggleLogin());
             adminLoginItem = new ToolStripMenuItem("Start at login as administrator", null, (s, e) => ToggleAdminLogin());
-            adminLoginItem.ToolTipText = "Needed for shortcuts to work in apps running as administrator.";
             menu.Items.Add(loginItem);
             menu.Items.Add(adminLoginItem);
             if (!KeyboardEngine.IsElevated)
@@ -165,7 +171,17 @@ namespace Cmdflip
             customItem.Checked = !snipItem.Checked && !snipAppItem.Checked;
             customItem.Text = customItem.Checked && c.Screenshot.Length > 0 ? "Other app: " + ShortName(c.Screenshot) : "Other app...";
             loginItem.Checked = Registry.GetValue(@"HKEY_CURRENT_USER\" + RunKey, AppName, null) != null;
-            adminLoginItem.Checked = AdminTaskExists();
+            adminLoginItem.Checked = AdminTask.Exists();
+            // An existing task can always be removed; a new one needs an install in Program Files.
+            bool adminAllowed = AdminTask.InProtectedFolder;
+            adminLoginItem.Enabled = adminAllowed || adminLoginItem.Checked;
+            adminLoginItem.Text = adminAllowed || adminLoginItem.Checked
+                ? "Start at login as administrator"
+                : "Start at login as administrator (needs install for all users)";
+            adminLoginItem.ToolTipText = adminAllowed
+                ? "Needed for shortcuts to work in apps running as administrator."
+                : "Only available when Cmdflip is installed for all users (in Program Files), where other " +
+                  "programs can't replace it. Reinstall and choose \"Install for all users\".";
 
             tray.Icon = c.Enabled ? iconOn : iconOff;
             var text = AppName + (c.Enabled ? "" : " (paused)") + (KeyboardEngine.IsElevated ? " - admin" : "");
@@ -256,67 +272,15 @@ namespace Cmdflip
             RefreshMenu();
         }
 
-        static bool AdminTaskExists()
-        {
-            try
-            {
-                var psi = new ProcessStartInfo("schtasks.exe", "/Query /TN " + AppName)
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                using (var p = Process.Start(psi))
-                {
-                    p.WaitForExit(3000);
-                    return p.ExitCode == 0;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         void ToggleAdminLogin()
         {
-            string args;
-            if (AdminTaskExists())
-            {
-                args = "/Delete /TN " + AppName + " /F";
-            }
-            else
-            {
-                // Built from XML because plain /Create gives the task a 72h time limit, no start on
-                // battery and below-normal priority (bad for keyboard hook latency).
-                string user = SecurityElement.Escape(WindowsIdentity.GetCurrent().Name);
-                string xml =
-                    "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
-                    "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n" +
-                    "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + user + "</UserId></LogonTrigger></Triggers>\n" +
-                    "  <Principals><Principal id=\"Author\"><UserId>" + user + "</UserId>" +
-                    "<LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n" +
-                    "  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" +
-                    "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" +
-                    "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>4</Priority></Settings>\n" +
-                    "  <Actions Context=\"Author\"><Exec><Command>" + SecurityElement.Escape(Application.ExecutablePath) + "</Command></Exec></Actions>\n" +
-                    "</Task>\n";
-                string file = Path.Combine(Path.GetTempPath(), "Cmdflip-task.xml");
-                File.WriteAllText(file, xml, System.Text.Encoding.Unicode);
-                args = "/Create /TN " + AppName + " /XML \"" + file + "\" /F";
-            }
-            try
-            {
-                var psi = new ProcessStartInfo("schtasks.exe", args) { Verb = "runas", UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden };
-                using (var p = Process.Start(psi)) p.WaitForExit(10000);
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                return; // UAC prompt cancelled
-            }
+            bool on = !AdminTask.Exists();
+            if (on && !AdminTask.InProtectedFolder) return;
+            if (!AdminTask.Set(on)) return;
+            if (on && !AdminTask.Exists())
+                ShowError("Could not create the start-at-login task.");
             // The scheduled task replaces the plain autostart entry.
-            if (AdminTaskExists())
+            if (AdminTask.Exists())
                 using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                     if (key.GetValue(AppName) != null) key.DeleteValue(AppName);
             RefreshMenu();
