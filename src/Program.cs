@@ -1,10 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using System.IO;
 using System.Security;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
@@ -48,6 +47,9 @@ namespace Cmdflip
 
         ToolStripMenuItem enabledItem, vimItem, cmd4Item, loginItem, adminLoginItem;
         ToolStripMenuItem snipItem, snipAppItem, customItem;
+        ToolStripMenuItem updateItem, autoUpdateItem, capsItem;
+        readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer { Interval = 10 * 1000 };
+        string updateUrl, notifiedTag;
 
         public TrayApp()
         {
@@ -75,11 +77,40 @@ namespace Cmdflip
 
             SystemEvents.SessionSwitch += OnSessionSwitch;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
+
+            // First check shortly after start, then once a day.
+            tray.BalloonTipClicked += (s, e) => { if (updateUrl != null) OpenUrl(updateUrl); };
+            updateTimer.Tick += (s, e) =>
+            {
+                updateTimer.Interval = 24 * 60 * 60 * 1000;
+                if (engine.Config.CheckForUpdates) CheckForUpdates(false);
+            };
+            updateTimer.Start();
+
+            // The installer signals this event to close a running copy before upgrading or uninstalling.
+            // The current user gets access explicitly, so a non-elevated installer can close an elevated copy.
+            var security = new EventWaitHandleSecurity();
+            security.AddAccessRule(new EventWaitHandleAccessRule(WindowsIdentity.GetCurrent().User,
+                EventWaitHandleRights.Synchronize | EventWaitHandleRights.Modify, AccessControlType.Allow));
+            bool createdNew;
+            quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, QuitEventName, out createdNew, security);
+            quitWait = ThreadPool.RegisterWaitForSingleObject(quitEvent,
+                (state, timedOut) => invoker.BeginInvoke(new Action(ExitThread)), null, Timeout.Infinite, true);
         }
+
+        const string QuitEventName = @"Local\Cmdflip.Quit";
+        EventWaitHandle quitEvent;
+        RegisteredWaitHandle quitWait;
 
         ContextMenuStrip BuildMenu()
         {
             var menu = new ContextMenuStrip();
+            menu.Items.Add(new ToolStripMenuItem(AppName + " " + UpdateChecker.CurrentVersion) { Enabled = false });
+            updateItem = new ToolStripMenuItem("Update available", null, (s, e) => OpenUrl(updateUrl ?? UpdateChecker.ReleasesPage));
+            updateItem.Font = new Font(updateItem.Font, FontStyle.Bold);
+            updateItem.Visible = false;
+            menu.Items.Add(updateItem);
+            menu.Items.Add(new ToolStripSeparator());
             enabledItem = new ToolStripMenuItem("Enabled", null, (s, e) => Update(c => c.Enabled = !c.Enabled));
             enabledItem.Font = new Font(enabledItem.Font, FontStyle.Bold);
             menu.Items.Add(enabledItem);
@@ -95,8 +126,11 @@ namespace Cmdflip
 
             cmd4Item = new ToolStripMenuItem("Plain Cmd+4 takes screenshot too", null, (s, e) => Update(c => c.Cmd4Screenshot = !c.Cmd4Screenshot));
             vimItem = new ToolStripMenuItem("Cmd+H/J/K/L as arrows", null, (s, e) => Update(c => c.VimArrows = !c.VimArrows));
+            capsItem = new ToolStripMenuItem("Caps Lock as Esc", null, (s, e) => Update(c => c.CapsLockAsEsc = !c.CapsLockAsEsc));
+            capsItem.ToolTipText = "Shift+Caps Lock still toggles Caps Lock.";
             menu.Items.Add(cmd4Item);
             menu.Items.Add(vimItem);
+            menu.Items.Add(capsItem);
             menu.Items.Add(new ToolStripSeparator());
 
             loginItem = new ToolStripMenuItem("Start at login", null, (s, e) => ToggleLogin());
@@ -108,6 +142,11 @@ namespace Cmdflip
                 menu.Items.Add(new ToolStripMenuItem("Restart as administrator", null, (s, e) => RestartElevated()));
             menu.Items.Add(new ToolStripMenuItem("Edit settings file...", null, (s, e) => OpenConfig()));
             menu.Items.Add(new ToolStripMenuItem("Shortcut cheat sheet", null, (s, e) => ShowHelp()));
+            var updates = new ToolStripMenuItem("Updates");
+            autoUpdateItem = new ToolStripMenuItem("Check automatically", null, (s, e) => Update(c => c.CheckForUpdates = !c.CheckForUpdates));
+            updates.DropDownItems.Add(autoUpdateItem);
+            updates.DropDownItems.Add(new ToolStripMenuItem("Check now", null, (s, e) => CheckForUpdates(true)));
+            menu.Items.Add(updates);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) => ExitThread()));
             return menu;
@@ -119,6 +158,8 @@ namespace Cmdflip
             enabledItem.Checked = c.Enabled;
             vimItem.Checked = c.VimArrows;
             cmd4Item.Checked = c.Cmd4Screenshot;
+            autoUpdateItem.Checked = c.CheckForUpdates;
+            capsItem.Checked = c.CapsLockAsEsc;
             snipItem.Checked = c.Screenshot == "ms-screenclip:";
             snipAppItem.Checked = c.Screenshot.IndexOf("Microsoft.ScreenSketch", StringComparison.OrdinalIgnoreCase) >= 0;
             customItem.Checked = !snipItem.Checked && !snipAppItem.Checked;
@@ -129,6 +170,33 @@ namespace Cmdflip
             tray.Icon = c.Enabled ? iconOn : iconOff;
             var text = AppName + (c.Enabled ? "" : " (paused)") + (KeyboardEngine.IsElevated ? " - admin" : "");
             tray.Text = text;
+        }
+
+        void CheckForUpdates(bool manual)
+        {
+            UpdateChecker.CheckAsync((tag, url) => invoker.BeginInvoke(new Action(() =>
+            {
+                if (tag != null)
+                {
+                    updateUrl = url;
+                    updateItem.Text = "Update available: " + tag + " - download";
+                    updateItem.Visible = true;
+                    if (manual || notifiedTag != tag)
+                        tray.ShowBalloonTip(8000, AppName, "Version " + tag + " is available. Click to download.", ToolTipIcon.Info);
+                    notifiedTag = tag;
+                }
+                else if (manual)
+                {
+                    MessageBox.Show("You have the latest version (" + UpdateChecker.CurrentVersion + "), " +
+                        "or the update server could not be reached.", AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            })));
+        }
+
+        static void OpenUrl(string url)
+        {
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch (Exception) { }
         }
 
         static string ShortName(string action)
@@ -292,7 +360,8 @@ namespace Cmdflip
                 "Cmd + Shift + 5\tscreenshot app\n" +
                 "Cmd + H/J/K/L\tarrows (optional)\n" +
                 "Cmd + Opt + Esc\tTask Manager\n" +
-                "Cmd + Ctrl + Q\tlock screen\n\n" +
+                "Cmd + Ctrl + Q\tlock screen\n" +
+                "Caps Lock\tEsc (optional, Shift+Caps Lock toggles caps)\n\n" +
                 "Opt + Left/Right\tword left / right\n" +
                 "Opt + Backspace/Del\tdelete word\n" +
                 "Opt + other keys\tnormal Windows key shortcuts (Win+E, Win+R...)\n" +
@@ -323,24 +392,9 @@ namespace Cmdflip
 
         static Icon MakeIcon(bool enabled)
         {
-            int size = SystemInformation.SmallIconSize.Width * 2;
-            using (var bmp = new Bitmap(size, size))
+            // Rendered at the exact tray size for the current DPI, so Windows doesn't rescale it.
+            using (var bmp = IconArt.Render(SystemInformation.SmallIconSize.Width, enabled))
             {
-                using (var g = Graphics.FromImage(bmp))
-                {
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                    var back = enabled ? Color.FromArgb(255, 32, 32, 36) : Color.FromArgb(255, 120, 120, 120);
-                    using (var brush = new SolidBrush(back))
-                    using (var path = RoundedRect(new RectangleF(0, 0, size - 1, size - 1), size / 4f))
-                        g.FillPath(brush, path);
-                    using (var font = new Font("Segoe UI Symbol", size * 0.55f, FontStyle.Bold, GraphicsUnit.Pixel))
-                    using (var fore = new SolidBrush(Color.White))
-                    {
-                        var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                        g.DrawString("⌘", font, fore, new RectangleF(0, size * 0.04f, size, size), fmt);
-                    }
-                }
                 IntPtr h = bmp.GetHicon();
                 var icon = (Icon)Icon.FromHandle(h).Clone();
                 Native.DestroyIcon(h);
@@ -348,22 +402,13 @@ namespace Cmdflip
             }
         }
 
-        static GraphicsPath RoundedRect(RectangleF r, float radius)
-        {
-            var p = new GraphicsPath();
-            float d = radius * 2;
-            p.AddArc(r.X, r.Y, d, d, 180, 90);
-            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            p.CloseFigure();
-            return p;
-        }
-
         protected override void ExitThreadCore()
         {
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            updateTimer.Stop();
+            quitWait.Unregister(null);
+            quitEvent.Dispose();
             watcher.Dispose();
             engine.Stop();
             tray.Visible = false;

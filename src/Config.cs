@@ -12,6 +12,8 @@ namespace Cmdflip
         public bool Enabled = true;
         public bool VimArrows = true;
         public bool Cmd4Screenshot = true;
+        public bool CheckForUpdates = true;
+        public bool CapsLockAsEsc = false;
         public string Screenshot = "ms-screenclip:";
         public string FullScreenshot = "keys:Win+PrintScreen";
         public string ScreenshotApp = @"shell:AppsFolder\Microsoft.ScreenSketch_8wekyb3d8bbwe!App";
@@ -43,6 +45,7 @@ namespace Cmdflip
                 c.Save();
                 return c;
             }
+            var seen = new HashSet<string>();
             foreach (var raw in File.ReadAllLines(FilePath))
             {
                 var line = raw.Trim();
@@ -51,11 +54,14 @@ namespace Cmdflip
                 if (eq < 0) continue;
                 var key = line.Substring(0, eq).Trim();
                 var value = line.Substring(eq + 1).Trim();
+                seen.Add(key.ToLowerInvariant());
                 switch (key.ToLowerInvariant())
                 {
                     case "enabled": c.Enabled = ParseBool(value, c.Enabled); break;
                     case "vimarrows": c.VimArrows = ParseBool(value, c.VimArrows); break;
                     case "cmd4screenshot": c.Cmd4Screenshot = ParseBool(value, c.Cmd4Screenshot); break;
+                    case "checkforupdates": c.CheckForUpdates = ParseBool(value, c.CheckForUpdates); break;
+                    case "capslockasesc": c.CapsLockAsEsc = ParseBool(value, c.CapsLockAsEsc); break;
                     case "screenshot": c.Screenshot = value; break;
                     case "fullscreenshot": c.FullScreenshot = value; break;
                     case "screenshotapp": c.ScreenshotApp = value; break;
@@ -70,8 +76,16 @@ namespace Cmdflip
                         break;
                 }
             }
+            // A file from an older version lacks newer settings; rewrite it so they become visible.
+            if (!seen.IsSupersetOf(KnownKeys)) c.Save();
             return c;
         }
+
+        static readonly string[] KnownKeys =
+        {
+            "enabled", "vimarrows", "cmd4screenshot", "checkforupdates", "capslockasesc",
+            "screenshot", "fullscreenshot", "screenshotapp", "spotlight", "excludedapps"
+        };
 
         static bool ParseBool(string s, bool fallback)
         {
@@ -109,9 +123,15 @@ namespace Cmdflip
             sb.AppendLine("# Cmd+H/J/K/L act as Left/Down/Up/Right arrows");
             sb.AppendLine("VimArrows = " + Bool(VimArrows));
             sb.AppendLine();
+            sb.AppendLine("# Caps Lock acts as Esc (Shift+Caps Lock still toggles Caps Lock)");
+            sb.AppendLine("CapsLockAsEsc = " + Bool(CapsLockAsEsc));
+            sb.AppendLine();
             sb.AppendLine("# Comma separated process names where keys behave like stock Windows,");
             sb.AppendLine("# e.g. mstsc.exe, vmconnect.exe, game.exe");
             sb.AppendLine("ExcludedApps = " + string.Join(", ", ExcludedApps));
+            sb.AppendLine();
+            sb.AppendLine("# Check GitHub once a day for a newer version (nothing is sent except the request)");
+            sb.AppendLine("CheckForUpdates = " + Bool(CheckForUpdates));
             File.WriteAllText(FilePath, sb.ToString(), Encoding.UTF8);
         }
 

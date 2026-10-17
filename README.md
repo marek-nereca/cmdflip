@@ -6,15 +6,36 @@ A small Windows tray app that brings macOS shortcuts to Windows.
 - **Windows key = Opt**
 - **Right Alt** is unchanged (AltGr keeps working)
 
-## Build & run
+Requires Windows 10 (1809 or later) or Windows 11.
 
-```powershell
-.\build.ps1            # uses the C# compiler that ships with Windows, no SDK needed
-.\bin\Cmdflip.exe
-```
+## Install
+
+Download `Cmdflip-<version>-setup.exe` from [Releases](https://github.com/marek-nereca/cmdflip/releases)
+and run it. It installs for your user only and needs no administrator rights. A portable zip
+is available too.
 
 Right-click the tray icon (⌘) for settings. Double-click it to pause or resume.
 Turn off any other key remapping tools while you use this app.
+
+## Build
+
+```powershell
+.\build.ps1                               # dev build, uses the C# compiler that ships with Windows
+.\build.ps1 -Version 1.2.0 -Installer     # release build + installer (needs Inno Setup 6)
+.\bin\Cmdflip.exe
+```
+
+## Releasing
+
+Versions follow [Semantic Versioning](https://semver.org). To publish a release:
+
+1. Move the notes under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) into a new
+   `## [x.y.z] - YYYY-MM-DD` section and commit.
+2. Tag and push: `git tag vx.y.z && git push origin vx.y.z`
+
+GitHub Actions builds the exe and installer, stamps the version from the tag, and publishes a
+release with the changelog notes and SHA-256 checksums. Tags with a suffix (`v1.0.0-beta.1`) are
+published as pre-releases.
 
 ## Shortcuts
 
@@ -38,12 +59,13 @@ Turn off any other key remapping tools while you use this app.
 | Opt + Backspace / Delete | delete word |
 | Opt + other keys | normal Win shortcuts (Win+E, Win+R, Win+L, ...) |
 | Opt alone | Start menu |
+| Caps Lock | Esc (optional, off by default; Shift + Caps Lock still toggles Caps Lock) |
 
 ## Settings
 
 `%APPDATA%\Cmdflip\config.ini` changes apply as soon as you save the file. You can set
 the screenshot tools and the Cmd+Space action (a program, a URI, or `keys:Win+Shift+S`),
-turn the vim arrows on or off, and list apps to exclude (`ExcludedApps = mstsc.exe, game.exe`).
+turn the vim arrows and Caps Lock as Esc on or off, and list apps to exclude (`ExcludedApps = mstsc.exe, game.exe`).
 
 ## Apps running as administrator
 

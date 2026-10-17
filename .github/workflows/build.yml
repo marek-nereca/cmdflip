@@ -1,0 +1,73 @@
+name: Build
+
+# Every push and pull request is built. Pushing a tag like v1.2.3 also publishes a GitHub Release
+# with the installer, a portable zip and SHA-256 checksums; the notes come from CHANGELOG.md.
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $v = "0.0.0-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build
+        shell: pwsh
+        run: ./build.ps1 -Version '${{ steps.version.outputs.version }}' -Installer
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item "bin/Cmdflip-$v-setup.exe" dist/
+          Compress-Archive -Path bin/Cmdflip.exe, LICENSE, README.md -DestinationPath "dist/Cmdflip-$v-portable.zip"
+          Get-ChildItem dist | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmdflip-${{ steps.version.outputs.version }}
+          path: dist/
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          # Release notes = the "## [x.y.z]" section of CHANGELOG.md
+          $notes = @(); $inSection = $false
+          foreach ($line in Get-Content CHANGELOG.md) {
+            if ($line -match '^## \[') { $inSection = $line -match "^## \[$([regex]::Escape($v))\]"; continue }
+            if ($line -match '^\[.+\]: ') { continue }
+            if ($inSection) { $notes += $line }
+          }
+          if (-not ($notes -join '').Trim()) { throw "CHANGELOG.md has no section for $v" }
+          $notes -join "`n" | Set-Content notes.md
+          $extra = @()
+          if ($v -match '-') { $extra += '--prerelease' }
+          gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist).FullName --title "Cmdflip $v" --notes-file notes.md @extra

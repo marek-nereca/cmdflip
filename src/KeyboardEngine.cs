@@ -53,6 +53,7 @@ namespace Cmdflip
         // Hook-thread state.
         bool cmdDown, cmdPass;
         bool optDown, optPass, optUsed;
+        bool capsAsEsc; // current Caps Lock press is being sent as Esc
         bool injCtrl, injAlt, injWin;
         readonly HashSet<int> swallowUp = new HashSet<int>();
         readonly HashSet<int> heldMods = new HashSet<int>();
@@ -149,8 +150,9 @@ namespace Cmdflip
             if (injCtrl) inputs.Add(Key(VK_LCONTROL, true));
             if (injAlt) inputs.Add(Key(VK_LMENU, true));
             if (injWin) inputs.Add(Key(VK_LWIN, true));
+            if (capsAsEsc) inputs.Add(Key(VK_ESCAPE, true));
             Send(inputs);
-            cmdDown = cmdPass = optDown = optPass = optUsed = false;
+            cmdDown = cmdPass = optDown = optPass = optUsed = capsAsEsc = false;
             injCtrl = injAlt = injWin = false;
             swallowUp.Clear();
             heldMods.Clear();
@@ -221,8 +223,10 @@ namespace Cmdflip
                 case VK_LSHIFT: case VK_RSHIFT: case VK_LCONTROL: case VK_RCONTROL:
                     if (down) heldMods.Add(vk); else heldMods.Remove(vk);
                     return false;
-                case VK_SHIFT: case VK_CONTROL: case VK_MENU: case VK_RMENU: case VK_CAPITAL:
+                case VK_SHIFT: case VK_CONTROL: case VK_MENU: case VK_RMENU:
                     return false;
+                case VK_CAPITAL:
+                    return OnCapsLock(down);
                 case VK_LMENU:
                     return OnCmd(down);
                 case VK_LWIN: case VK_RWIN:
@@ -264,6 +268,27 @@ namespace Cmdflip
             if (injAlt) inputs.Add(Key(VK_LMENU, true)); // commits the Alt+Tab switcher
             Send(inputs);
             injCtrl = injAlt = false;
+            return true;
+        }
+
+        // Optional Caps Lock -> Esc. Shift+Caps Lock still toggles Caps Lock.
+        bool OnCapsLock(bool down)
+        {
+            if (down)
+            {
+                if (optDown && !optPass) optUsed = true;
+                if (!capsAsEsc)
+                {
+                    bool shift = heldMods.Contains(VK_LSHIFT) || heldMods.Contains(VK_RSHIFT);
+                    if (!config.CapsLockAsEsc || shift || !ShouldRemap()) return false;
+                    capsAsEsc = true;
+                }
+                Send(new List<Native.INPUT> { Key(VK_ESCAPE, false) }); // repeats while held, like a real key
+                return true;
+            }
+            if (!capsAsEsc) return false;
+            capsAsEsc = false;
+            Send(new List<Native.INPUT> { Key(VK_ESCAPE, true) });
             return true;
         }
 
