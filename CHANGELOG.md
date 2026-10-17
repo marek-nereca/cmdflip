@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- `SHA256SUMS.txt` in releases uses LF line endings, so `sha256sum -c SHA256SUMS.txt` works on
+  Linux and macOS.
+
 ## [0.1.1] - 2026-10-17
 
 ### Security
