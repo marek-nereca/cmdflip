@@ -48,9 +48,11 @@ jobs:
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item "bin/Cmdflip-$v-setup.exe" dist/
           Compress-Archive -Path bin/Cmdflip.exe, LICENSE, README.md -DestinationPath "dist/Cmdflip-$v-portable.zip"
-          Get-ChildItem dist | ForEach-Object {
+          # LF line endings and no BOM, so `sha256sum -c SHA256SUMS.txt` works on Linux and macOS too.
+          $sums = Get-ChildItem dist | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Set-Content dist/SHA256SUMS.txt
+          }
+          [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", ($sums -join "`n") + "`n")
 
       - uses: actions/upload-artifact@v7
         with:
