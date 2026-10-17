@@ -8,12 +8,15 @@ on:
     tags: ['v*.*.*']
   pull_request:
 
+# Read-only by default; only the release job below gets write access.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -28,9 +31,11 @@ jobs:
           }
           "version=$v" >> $env:GITHUB_OUTPUT
 
+      # Pinned so a release never changes because the runner image or Chocolatey moved on.
+      # `upgrade --allow-downgrade` installs exactly this version whether or not another one is present.
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --no-progress -y
+        run: choco upgrade innosetup --version 6.7.1 --allow-downgrade --no-progress -y
 
       - name: Build
         shell: pwsh
@@ -52,13 +57,26 @@ jobs:
           name: cmdflip-${{ steps.version.outputs.version }}
           path: dist/
 
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: cmdflip-${{ needs.build.outputs.version }}
+          path: dist/
+
       - name: Publish release
-        if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $v = '${{ steps.version.outputs.version }}'
+          $v = '${{ needs.build.outputs.version }}'
           # Release notes = the "## [x.y.z]" section of CHANGELOG.md
           $notes = @(); $inSection = $false
           foreach ($line in Get-Content CHANGELOG.md) {
